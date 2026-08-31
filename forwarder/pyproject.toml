@@ -8,4 +8,4 @@ dependencies = [
 
 [tool.github-actions.options]
 deploy_dev_image = true
-deploy_prod_image = false
+deploy_prod_image = true
