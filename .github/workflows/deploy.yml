@@ -111,7 +111,7 @@ jobs:
         id: ecr-dev
         uses: aws-actions/amazon-ecr-login@19d944daaa35f0fa1d3f7f8af1d3f2e5de25c5b7  # v2
 
-      - name: Push image and deploy (dev)
+      - name: Push image to ECR (dev)
         if: steps.flags.outputs.dev == 'true'
         env:
           ECR_REGISTRY: ${{ steps.ecr-dev.outputs.registry }}
@@ -122,11 +122,6 @@ jobs:
           docker tag turbo/mirror-$FOLDER:$IMAGE_TAG $ECR_REGISTRY/turbo/mirror-$FOLDER:latest
           docker push $ECR_REGISTRY/turbo/mirror-$FOLDER:$IMAGE_TAG
           docker push $ECR_REGISTRY/turbo/mirror-$FOLDER:latest
-          aws lambda update-function-code \
-            --function-name turbo-mirror-$FOLDER-dev \
-            --image-uri $ECR_REGISTRY/turbo/mirror-$FOLDER:$IMAGE_TAG
-          aws lambda wait function-updated \
-            --function-name turbo-mirror-$FOLDER-dev
 
       # --- Prod deployment ---
       - name: Configure AWS credentials (prod)
@@ -144,7 +139,7 @@ jobs:
         id: ecr-prod
         uses: aws-actions/amazon-ecr-login@19d944daaa35f0fa1d3f7f8af1d3f2e5de25c5b7  # v2
 
-      - name: Push image and deploy (prod)
+      - name: Push image to ECR (prod)
         if: steps.flags.outputs.prod == 'true'
         env:
           ECR_REGISTRY: ${{ steps.ecr-prod.outputs.registry }}
@@ -155,8 +150,3 @@ jobs:
           docker tag turbo/mirror-$FOLDER:$IMAGE_TAG $ECR_REGISTRY/turbo/mirror-$FOLDER:latest
           docker push $ECR_REGISTRY/turbo/mirror-$FOLDER:$IMAGE_TAG
           docker push $ECR_REGISTRY/turbo/mirror-$FOLDER:latest
-          aws lambda update-function-code \
-            --function-name turbo-mirror-$FOLDER-prod \
-            --image-uri $ECR_REGISTRY/turbo/mirror-$FOLDER:$IMAGE_TAG
-          aws lambda wait function-updated \
-            --function-name turbo-mirror-$FOLDER-prod
