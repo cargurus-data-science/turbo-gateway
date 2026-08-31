@@ -1,0 +1,14 @@
+name: Setup AWS CLI
+description: Install AWS CLI v2 if it's not already on PATH (some self-hosted runners pre-install it).
+
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      run: |
+        if ! command -v aws &> /dev/null; then
+          curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o /tmp/awscliv2.zip
+          unzip -q /tmp/awscliv2.zip -d /tmp
+          sudo /tmp/aws/install
+          rm -rf /tmp/awscliv2.zip /tmp/aws
+        fi

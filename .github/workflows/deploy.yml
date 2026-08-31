@@ -1,0 +1,162 @@
+name: deploy
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'authorizer/**'
+      - 'forwarder/**'
+  release:
+    types: [released]
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  AWS_REGION: us-east-1
+
+jobs:
+  # Detect which lambda folders changed; release always deploys both
+  changes:
+    runs-on: arc-ent
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v4.2.2
+
+      - uses: dorny/paths-filter@v3
+        id: filter
+        if: github.event_name == 'push'
+        with:
+          filters: |
+            authorizer:
+              - 'authorizer/**'
+            forwarder:
+              - 'forwarder/**'
+
+      - name: Set deploy matrix
+        id: set-matrix
+        env:
+          AUTHORIZER_CHANGED: ${{ steps.filter.outputs.authorizer }}
+          FORWARDER_CHANGED: ${{ steps.filter.outputs.forwarder }}
+        run: |
+          python3 - <<'EOF'
+          import json, os
+          event = os.environ.get("GITHUB_EVENT_NAME", "")
+          if event == "release":
+              folders = ["authorizer", "forwarder"]
+          else:
+              folders = []
+              if os.environ.get("AUTHORIZER_CHANGED") == "true":
+                  folders.append("authorizer")
+              if os.environ.get("FORWARDER_CHANGED") == "true":
+                  folders.append("forwarder")
+          with open(os.environ["GITHUB_OUTPUT"], "a") as out:
+              out.write(f"matrix={json.dumps(folders)}\n")
+          EOF
+
+  deploy:
+    needs: [changes]
+    if: needs.changes.outputs.matrix != '[]'
+    runs-on: arc-ent
+    strategy:
+      fail-fast: false
+      matrix:
+        folder: ${{ fromJson(needs.changes.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v4.2.2
+
+      - name: Parse deploy flags
+        id: flags
+        env:
+          FOLDER: ${{ matrix.folder }}
+        run: |
+          python3 - <<'EOF'
+          import tomllib, os
+          folder = os.environ["FOLDER"]
+          with open(f"{folder}/pyproject.toml", "rb") as f:
+              data = tomllib.load(f)
+          opts = data.get("tool", {}).get("github-actions", {}).get("options", {})
+          dev = str(opts.get("deploy_dev_image", False)).lower()
+          prod = str(opts.get("deploy_prod_image", False)).lower()
+          with open(os.environ["GITHUB_OUTPUT"], "a") as out:
+              out.write(f"dev={dev}\n")
+              out.write(f"prod={prod}\n")
+          EOF
+
+      - name: Build image
+        if: steps.flags.outputs.dev == 'true' || steps.flags.outputs.prod == 'true'
+        run: |
+          docker build \
+            -t turbo/mirror-${{ matrix.folder }}:${{ github.sha }} \
+            ${{ matrix.folder }}/
+
+      # --- Dev deployment ---
+      - name: Configure AWS credentials (dev)
+        if: steps.flags.outputs.dev == 'true'
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a  # v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/github/turbo-gateway-gha-deploy
+          role-skip-session-tagging: true
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to ECR (dev)
+        if: steps.flags.outputs.dev == 'true'
+        id: ecr-dev
+        uses: aws-actions/amazon-ecr-login@19d944daaa35f0fa1d3f7f8af1d3f2e5de25c5b7  # v2
+
+      - name: Push image and deploy (dev)
+        if: steps.flags.outputs.dev == 'true'
+        env:
+          ECR_REGISTRY: ${{ steps.ecr-dev.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
+          FOLDER: ${{ matrix.folder }}
+        run: |
+          docker tag turbo/mirror-$FOLDER:$IMAGE_TAG $ECR_REGISTRY/turbo/mirror-$FOLDER:$IMAGE_TAG
+          docker tag turbo/mirror-$FOLDER:$IMAGE_TAG $ECR_REGISTRY/turbo/mirror-$FOLDER:latest
+          docker push $ECR_REGISTRY/turbo/mirror-$FOLDER:$IMAGE_TAG
+          docker push $ECR_REGISTRY/turbo/mirror-$FOLDER:latest
+          aws lambda update-function-code \
+            --function-name turbo-mirror-$FOLDER-dev \
+            --image-uri $ECR_REGISTRY/turbo/mirror-$FOLDER:$IMAGE_TAG
+          aws lambda wait function-updated \
+            --function-name turbo-mirror-$FOLDER-dev
+
+      # --- Prod deployment ---
+      - name: Configure AWS credentials (prod)
+        if: steps.flags.outputs.prod == 'true'
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a  # v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_PROD_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_PROD_SECRET_ACCESS_KEY }}
+          role-to-assume: arn:aws:iam::${{ secrets.AWS_PROD_ACCOUNT_ID }}:role/github/turbo-gateway-gha-deploy
+          role-skip-session-tagging: true
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to ECR (prod)
+        if: steps.flags.outputs.prod == 'true'
+        id: ecr-prod
+        uses: aws-actions/amazon-ecr-login@19d944daaa35f0fa1d3f7f8af1d3f2e5de25c5b7  # v2
+
+      - name: Push image and deploy (prod)
+        if: steps.flags.outputs.prod == 'true'
+        env:
+          ECR_REGISTRY: ${{ steps.ecr-prod.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
+          FOLDER: ${{ matrix.folder }}
+        run: |
+          docker tag turbo/mirror-$FOLDER:$IMAGE_TAG $ECR_REGISTRY/turbo/mirror-$FOLDER:$IMAGE_TAG
+          docker tag turbo/mirror-$FOLDER:$IMAGE_TAG $ECR_REGISTRY/turbo/mirror-$FOLDER:latest
+          docker push $ECR_REGISTRY/turbo/mirror-$FOLDER:$IMAGE_TAG
+          docker push $ECR_REGISTRY/turbo/mirror-$FOLDER:latest
+          aws lambda update-function-code \
+            --function-name turbo-mirror-$FOLDER-prod \
+            --image-uri $ECR_REGISTRY/turbo/mirror-$FOLDER:$IMAGE_TAG
+          aws lambda wait function-updated \
+            --function-name turbo-mirror-$FOLDER-prod
