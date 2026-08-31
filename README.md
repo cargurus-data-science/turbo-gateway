@@ -10,8 +10,6 @@ forwarder/    - Lambda that forwards verified requests downstream
 .github/
   workflows/
     deploy.yml              - CI pipeline: build and push Docker images to ECR
-  actions/
-    setup-aws-cli/          - Composite action to install AWS CLI on the runner
 ```
 
 ## Lambda functions
