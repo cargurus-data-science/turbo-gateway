@@ -4,7 +4,6 @@ on:
   push:
     branches: [main]
     paths:
-      - 'authorizer/**'
       - 'forwarder/**'
   release:
     types: [released]
@@ -33,26 +32,21 @@ jobs:
         if: github.event_name == 'push'
         with:
           filters: |
-            authorizer:
-              - 'authorizer/**'
             forwarder:
               - 'forwarder/**'
 
       - name: Set deploy matrix
         id: set-matrix
         env:
-          AUTHORIZER_CHANGED: ${{ steps.filter.outputs.authorizer }}
           FORWARDER_CHANGED: ${{ steps.filter.outputs.forwarder }}
         run: |
           python3 - <<'EOF'
           import json, os
           event = os.environ.get("GITHUB_EVENT_NAME", "")
           if event == "release":
-              folders = ["authorizer", "forwarder"]
+              folders = ["forwarder"]
           else:
               folders = []
-              if os.environ.get("AUTHORIZER_CHANGED") == "true":
-                  folders.append("authorizer")
               if os.environ.get("FORWARDER_CHANGED") == "true":
                   folders.append("forwarder")
           with open(os.environ["GITHUB_OUTPUT"], "a") as out:
