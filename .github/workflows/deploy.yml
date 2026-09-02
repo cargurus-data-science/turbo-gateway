@@ -21,7 +21,7 @@ env:
 jobs:
   # Detect which lambda folders changed; release always deploys both
   changes:
-    runs-on: arc-ent
+    runs-on: arc-org-amd64
     outputs:
       matrix: ${{ steps.set-matrix.outputs.matrix }}
     steps:
@@ -56,7 +56,7 @@ jobs:
   deploy:
     needs: [changes]
     if: needs.changes.outputs.matrix != '[]'
-    runs-on: arc-ent
+    runs-on: arc-org-amd64
     strategy:
       fail-fast: false
       matrix:
