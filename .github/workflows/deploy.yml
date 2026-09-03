@@ -86,6 +86,7 @@ jobs:
         if: steps.flags.outputs.dev == 'true' || steps.flags.outputs.prod == 'true'
         run: |
           docker build \
+            --platform linux/amd64 \
             -t turbo/mirror-${{ matrix.folder }}:${{ github.sha }} \
             ${{ matrix.folder }}/
 
