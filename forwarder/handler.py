@@ -1,10 +1,13 @@
 import hashlib
 import hmac
 import json
+import logging
 import os
 
-
 import boto3
+
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
 
 _sqs = boto3.client("sqs")
 _sm = boto3.client("secretsmanager")
@@ -22,12 +25,16 @@ def _get_secret() -> str:
 
 
 def handler(event, context):
+    logger.info("Input event: %s", json.dumps(event))
+
     headers = {k.lower(): v for k, v in (event.get("headers") or {}).items()}
     signature_header = headers.get("x-webhook-signature", "")
     body = event.get("body") or ""
 
     if not signature_header.startswith("sha256="):
-        return {"statusCode": 401, "body": json.dumps({"error": "missing signature"})}
+        response = {"statusCode": 401, "body": json.dumps({"error": "missing signature"})}
+        logger.info("Output: %s", response)
+        return response
 
     expected = signature_header[len("sha256="):]
     secret = _get_secret()
@@ -39,11 +46,15 @@ def handler(event, context):
     ).hexdigest()
 
     if not hmac.compare_digest(computed, expected):
-        return {"statusCode": 401, "body": json.dumps({"error": "invalid signature"})}
+        response = {"statusCode": 401, "body": json.dumps({"error": "invalid signature"})}
+        logger.info("Output: %s", response)
+        return response
 
     _sqs.send_message(
         QueueUrl=_queue_url,
         MessageBody=body,
     )
 
-    return {"statusCode": 200, "body": json.dumps({"status": "ok"})}
+    response = {"statusCode": 200, "body": json.dumps({"status": "ok"})}
+    logger.info("Output: %s", response)
+    return response
